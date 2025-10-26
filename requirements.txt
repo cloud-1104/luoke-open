@@ -1,0 +1,13 @@
+# 洛克王国自动激活工具 - 依赖包列表 3.8 python
+
+# HTTP请求库
+requests>=2.31.0
+
+# HTML解析库
+beautifulsoup4>=4.12.0
+
+# 图片处理库
+Pillow>=10.0.0
+
+# OCR识别库(可选,如果使用OCR模式则必需)
+ddddocr>=1.4.0
