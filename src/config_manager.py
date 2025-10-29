@@ -14,10 +14,15 @@ class ConfigManager:
     """配置管理器 - 处理配置文件的读取、保存和默认值"""
 
     DEFAULT_CONFIG = {
+        "use_miniapp_auth": False,  # 是否使用小程序验证(默认关闭)
         "miniapp_authorization": "",  # 小程序Authorization token
+        "miniapp_data": "",  # 小程序请求data参数(JSON字符串)
         "web_cookies": [],  # 网页端Cookie列表,支持多个Cookie并发兑换
         "announcement_keyword": "Day1",  # 公告关键字(如Day1, Day2...)
-        "use_ocr": False,  # 是否使用OCR识别验证码
+        "auto_keyword": True,  # 是否自动计算关键词(默认启用)
+        "keyword_prefix": "Day",  # 关键词前缀
+        "activity_start_date": "2025-10-24",  # 活动开始日期
+        "use_ocr": True,  # 是否使用OCR识别验证码(默认启用)
         "ocr_max_retries": 3,  # OCR识别最大重试次数
         "redeem_max_retries": 5,  # 兑换接口最大重试次数(验证码错误时)
         "request_threads": 10,  # 请求公告列表的线程数
@@ -104,8 +109,27 @@ class ConfigManager:
             (是否有效, 错误信息)
         """
         # 检查必填字段
-        if not self.config.get("miniapp_authorization"):
-            return False, "小程序Authorization未配置"
+        use_miniapp_auth = self.config.get("use_miniapp_auth", False)
+
+        if use_miniapp_auth:
+            # 如果启用小程序验证，则需要验证相关字段
+            if not self.config.get("miniapp_authorization"):
+                return False, "小程序Authorization未配置"
+
+            # 检查并验证miniapp_data
+            miniapp_data = self.config.get("miniapp_data", "")
+            if not miniapp_data:
+                return False, "小程序Data参数未配置"
+
+            try:
+                data_obj = json.loads(miniapp_data)
+                # 验证req_path必须是/api/home/index
+                if data_obj.get("req_path") != "/api/home/index":
+                    return False, f"小程序Data参数错误: req_path必须为/api/home/index，当前为{data_obj.get('req_path')}"
+            except json.JSONDecodeError:
+                return False, "小程序Data参数格式错误，必须是有效的JSON字符串"
+            except Exception as e:
+                return False, f"小程序Data参数验证失败: {e}"
 
         web_cookies = self.config.get("web_cookies", [])
         if not web_cookies or len(web_cookies) == 0:

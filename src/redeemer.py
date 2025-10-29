@@ -12,6 +12,7 @@ from src.api_client import APIClient
 from src.announcement_fetcher import AnnouncementFetcher
 from src.password_extractor import PasswordExtractor
 from src.cookie_pool import CookiePool
+from src.exceptions import InvalidSessionError
 
 
 class RedeemController:
@@ -29,7 +30,9 @@ class RedeemController:
 
         # 初始化API客户端(仅用于获取公告,不用于兑换)
         self.api_client = APIClient(
+            use_miniapp_auth=config.get("use_miniapp_auth", False),
             miniapp_auth=config.get("miniapp_authorization", ""),
+            miniapp_data=config.get("miniapp_data", ""),
             web_cookie="",  # 公告接口不需要Cookie
             timeout=config.get("request_timeout", 5)
         )
@@ -49,7 +52,7 @@ class RedeemController:
             self.cookie_pool = CookiePool(
                 miniapp_auth=config.get("miniapp_authorization", ""),
                 web_cookies=web_cookies,
-                use_ocr=config.get("use_ocr", False),
+                use_ocr=config.get("use_ocr", True),
                 ocr_max_retries=config.get("ocr_max_retries", 3),
                 timeout=config.get("request_timeout", 5),
                 use_proxy=config.get("use_proxy", False),
@@ -106,10 +109,23 @@ class RedeemController:
                     f"正在轮询公告列表(第{poll_attempt}次)..."
                 )
 
-                announcement_id = self.announcement_fetcher.fetch_announcement_list(
-                    keyword=keyword,
-                    progress_callback=progress_callback
-                )
+                try:
+                    announcement_id = self.announcement_fetcher.fetch_announcement_list(
+                        keyword=keyword,
+                        progress_callback=progress_callback
+                    )
+                except InvalidSessionError as e:
+                    # 小程序登录会话失效
+                    self.logger.error(f"小程序登录会话失效: {e}")
+                    return self._error_result(
+                        "小程序登录会话已失效!\n\n"
+                        "请按以下步骤操作:\n"
+                        "1. 重新打开洛克王国小程序\n"
+                        "2. 使用抓包工具获取新的Authorization和Data参数\n"
+                        "3. 在「配置」选项卡中更新小程序Authorization和Data\n"
+                        "4. 点击「保存配置」按钮\n"
+                        "5. 重新开始执行"
+                    )
 
                 if announcement_id:
                     self.logger.info(f"✓ 找到目标公告! (轮询{poll_attempt}次)")

@@ -7,31 +7,37 @@ import requests
 import random
 from typing import Dict, Any, Optional
 from src.logger import LoggerManager
+from src.exceptions import InvalidSessionError
 
 
 class APIClient:
     """API请求客户端 - 封装所有HTTP接口调用"""
 
     # 接口URL常量
-    ANNOUNCEMENT_LIST_URL = "https://morefun.game.qq.com/act/v1/api/v1/gateway"
+    ANNOUNCEMENT_LIST_URL = "https://morefun.game.qq.com/rocom/E80EH8LJ/homeIndex"
+    ANNOUNCEMENT_LIST_URL_LEGACY = "https://morefun.game.qq.com/act/v1/api/v1/gateway"
     ANNOUNCEMENT_DETAIL_URL = "https://morefun.game.qq.com/rocom/E80EH8LJ/threadDetail"
     REDEEM_URL = "https://comm.ams.game.qq.com/ide/"
     CAPTCHA_URL = "https://ssl.captcha.qq.com/getimage"
 
-    def __init__(self, miniapp_auth: str, web_cookie: str, timeout: int = 5,
+    def __init__(self, use_miniapp_auth: bool, miniapp_auth: str, miniapp_data: str, web_cookie: str, timeout: int = 5,
                  use_proxy: bool = False, proxy_host: str = "", proxy_port: int = 0):
         """
         初始化API客户端
 
         Args:
+            use_miniapp_auth: 是否使用小程序验证
             miniapp_auth: 小程序Authorization token
+            miniapp_data: 小程序请求data参数(JSON字符串)
             web_cookie: 网页端完整Cookie字符串
             timeout: 请求超时时间(秒)
             use_proxy: 是否使用代理(仅用于网页端请求)
             proxy_host: 代理主机地址
             proxy_port: 代理端口
         """
+        self.use_miniapp_auth = use_miniapp_auth
         self.miniapp_auth = miniapp_auth
+        self.miniapp_data = miniapp_data
         self.web_cookie = web_cookie
         self.timeout = timeout
         self.logger = LoggerManager().get_logger()
@@ -145,6 +151,69 @@ class APIClient:
         Returns:
             成功返回公告列表数据,失败返回None
         """
+        if self.use_miniapp_auth:
+            # 使用旧接口（需要验证）
+            return self._get_announcement_list_with_auth()
+        else:
+            # 使用新接口（不需要验证）
+            return self._get_announcement_list_no_auth()
+
+    def _get_announcement_list_no_auth(self) -> Optional[Dict[str, Any]]:
+        """
+        获取公告列表（新接口，不需要验证）
+
+        Returns:
+            成功返回公告列表数据,失败返回None
+        """
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf2541022) XWEB/16467',
+            'Content-Type': 'application/json',
+            'xweb_xhr': '1',
+            'sec-fetch-site': 'cross-site',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-dest': 'empty',
+            'referer': 'https://servicewechat.com/wx9a5bc2cdcaff1af1/8/page-frame.html',
+            'accept-language': 'zh-CN,zh;q=0.9',
+            'priority': 'u=1, i'
+        }
+
+        data = {
+            "req_param": {
+                "order": "vDesc"
+            }
+        }
+
+        try:
+            response = requests.post(
+                f"{self.ANNOUNCEMENT_LIST_URL}?X-Mcube-Act-Id=E80EH8LJ",
+                headers=headers,
+                json=data,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            if result.get('code') == 0:
+                return result.get('data', {})
+            else:
+                error_msg = result.get('msg', '')
+                self.logger.error(f"获取公告列表失败: {error_msg}")
+                return None
+
+        except requests.RequestException as e:
+            self.logger.debug(f"请求公告列表异常: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"获取公告列表发生未知错误: {e}")
+            return None
+
+    def _get_announcement_list_with_auth(self) -> Optional[Dict[str, Any]]:
+        """
+        获取公告列表（旧接口，需要验证）
+
+        Returns:
+            成功返回公告列表数据,失败返回None
+        """
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf2541022) XWEB/16467',
             'origin': 'https://rocom.qq.com',
@@ -159,15 +228,14 @@ class APIClient:
             'Content-Type': 'application/x-www-form-urlencoded'
         }
 
-        # 提取openid从authorization token中获取(如果需要动态提取)
-        # 这里暂时使用文档中的固定值,实际可能需要从JWT解析
+        # 使用配置的data参数
         data = {
-            'data': '{"account_type":"wxmini","openid":"o5p9X7GCkAQs-mucVhgPsPMsE00k","area_id":1,"plat_id":1,"biz_code":"rocom","act_id":"E80EH8LJ","server_type":1,"req_path":"/api/home/index","req_type":"POST","req_param":{}}'
+            'data': self.miniapp_data
         }
 
         try:
             response = requests.post(
-                f"{self.ANNOUNCEMENT_LIST_URL}?X-Mcube-Act-Id=E80EH8LJ",
+                f"{self.ANNOUNCEMENT_LIST_URL_LEGACY}?X-Mcube-Act-Id=E80EH8LJ",
                 headers=headers,
                 data=data,
                 timeout=self.timeout
@@ -178,9 +246,18 @@ class APIClient:
             if result.get('code') == 0:
                 return result.get('data', {})
             else:
-                self.logger.error(f"获取公告列表失败: {result.get('msg')}")
+                error_msg = result.get('msg', '')
+                self.logger.error(f"获取公告列表失败: {error_msg}")
+
+                # 检测是否为登录会话无效
+                if 'Invalid login session' in error_msg or 'login session' in error_msg.lower():
+                    raise InvalidSessionError(f"小程序登录会话已失效，请重新获取Authorization和Data并更新配置")
+
                 return None
 
+        except InvalidSessionError:
+            # 直接向上抛出,不捕获
+            raise
         except requests.RequestException as e:
             self.logger.debug(f"请求公告列表异常: {e}")
             return None

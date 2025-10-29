@@ -8,6 +8,7 @@ import time
 from typing import Optional, Dict, Any, Callable
 from src.api_client import APIClient
 from src.logger import LoggerManager
+from src.exceptions import InvalidSessionError
 
 
 class AnnouncementFetcher:
@@ -30,6 +31,7 @@ class AnnouncementFetcher:
         self.success_flag = threading.Event()  # 成功标志
         self.result_lock = threading.Lock()  # 结果锁
         self.result: Optional[Dict[str, Any]] = None  # 存储成功的结果
+        self.error: Optional[Exception] = None  # 存储错误信息
 
     def _fetch_worker(self, worker_id: int, progress_callback: Optional[Callable] = None) -> None:
         """
@@ -61,6 +63,16 @@ class AnnouncementFetcher:
                     if progress_callback:
                         progress_callback(f"线程{worker_id}正在重试...")
 
+            except InvalidSessionError as e:
+                # 登录会话无效,停止所有线程并记录错误
+                with self.result_lock:
+                    if self.error is None:
+                        self.error = e
+                        self.stop_flag.set()
+                        self.logger.error(f"线程{worker_id}检测到登录会话失效,停止所有请求")
+                        if progress_callback:
+                            progress_callback(f"检测到登录会话失效")
+                break
             except Exception as e:
                 self.logger.error(f"线程{worker_id}发生异常: {e}")
 
@@ -86,6 +98,7 @@ class AnnouncementFetcher:
         self.stop_flag.clear()
         self.success_flag.clear()
         self.result = None
+        self.error = None
 
         self.logger.info(f"开始多线程获取公告列表(线程数: {self.thread_count}, 关键字: {keyword})")
         if progress_callback:
@@ -102,8 +115,8 @@ class AnnouncementFetcher:
             thread.start()
             threads.append(thread)
 
-        # 无限等待直到成功(移除超时限制,避免高峰期请求失败导致程序停摆)
-        while not self.success_flag.is_set():
+        # 无限等待直到成功或出错(移除超时限制,避免高峰期请求失败导致程序停摆)
+        while not self.success_flag.is_set() and not self.stop_flag.is_set():
             time.sleep(0.1)
 
         # 停止所有线程
@@ -112,6 +125,10 @@ class AnnouncementFetcher:
         # 等待所有线程结束
         for thread in threads:
             thread.join(timeout=1)
+
+        # 检查是否有错误
+        if self.error:
+            raise self.error
 
         # 解析公告列表,查找匹配关键字的公告
         if self.result:

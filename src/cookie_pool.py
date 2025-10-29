@@ -35,7 +35,9 @@ class CookieRedeemer:
 
         # 每个Cookie独立的API客户端(维护独立Session)
         self.api_client = APIClient(
+            use_miniapp_auth=False,  # Cookie池不使用小程序验证
             miniapp_auth=miniapp_auth,
+            miniapp_data="",  # Cookie池不需要data参数,仅用于兑换
             web_cookie=web_cookie,
             timeout=timeout,
             use_proxy=use_proxy,
